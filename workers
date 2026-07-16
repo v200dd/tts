@@ -71,7 +71,7 @@ export default {
 
     let targetUrl = null;
     let targetHost = null;
-    let shouldCache = false;
+    let shouldCache = false;   // 仅当代理时用于缓存（音频已改为重定向，不再使用）
     let noCache = false;
     let handleCors = false;
     let forceMethod = null;
@@ -100,9 +100,8 @@ export default {
     // --- D. FineVoice 任务轮询接口 (异步TTS) ---
     else if (path.startsWith("/v1/task/")) {
       targetHost = "apis.finevoice.ai";
-      targetUrl = `https://${targetHost}${path}`;  // 保留完整路径
+      targetUrl = `https://${targetHost}${path}`;
       handleCors = true;
-      // 轮询是 GET，不设置 forceMethod
     }
 
     // --- E. FineShare 旧版 FV 转语音 (保留兼容) ---
@@ -121,19 +120,22 @@ export default {
       handleCors = true;
     }
 
-    // --- G. 音频缓存 ---
+    // --- G. 音频缓存（改为 302 重定向到源站，不再经过代理） ---
     else if (path.startsWith("/tts-generated-voices/")) {
-      targetHost = "dlaudio.fineshare.net";
-      targetUrl = `https://${targetHost}${path}`;
-      shouldCache = true;
+      const realUrl = "https://dlaudio.fineshare.net" + path;
+      const redirectResponse = Response.redirect(realUrl, 302);
+      // 可让浏览器缓存重定向关系，减轻 Worker 压力
+      redirectResponse.headers.set("Cache-Control", "public, max-age=86400");
+      return redirectResponse;
     }
 
-    // --- H. 通用音频下载 ---
+    // --- H. 通用音频下载（改为 302 重定向到源站，不再经过代理） ---
     else if (path.startsWith("/fvdlaudio/")) {
-      targetHost = "dlaudio.fineshare.net";
       const newPath = path.replace("/fvdlaudio/", "/");
-      targetUrl = `https://${targetHost}${newPath}`;
-      shouldCache = true;
+      const realUrl = "https://dlaudio.fineshare.net" + newPath;
+      const redirectResponse = Response.redirect(realUrl, 302);
+      redirectResponse.headers.set("Cache-Control", "public, max-age=86400");
+      return redirectResponse;
     }
 
     // --- I. 签到/API ---
@@ -155,7 +157,7 @@ export default {
     }
 
     // =========================================================
-    // 3. 执行请求转发
+    // 3. 执行请求转发（仅当 targetUrl 不为空时触发）
     // =========================================================
 
     if (targetUrl) {
@@ -209,7 +211,7 @@ export default {
           newResponse.headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
         }
 
-        // 缓存
+        // 缓存（仅当代理流式传输时生效，G/H 已重定向不会走到这里）
         if (shouldCache) {
           newResponse.headers.set("Cache-Control", "public, max-age=86400");
           if (path.endsWith(".mp3")) newResponse.headers.set("Content-Type", "audio/mpeg");
